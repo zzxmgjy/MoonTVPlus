@@ -40,6 +40,16 @@ export async function generateMetadata(): Promise<Metadata> {
     title: siteName,
     description: '影视聚合',
     manifest: '/manifest.json',
+    // 供配套浏览器扩展（moontvplus-extension）识别本站部署（勿删）
+    other: {
+      'moontvplus-site': '1',
+    },
+    // iOS 添加到主屏幕：沉浸式状态栏（需配合 viewport-fit=cover + 顶部 safe-area）
+    appleWebApp: {
+      capable: true,
+      statusBarStyle: 'black-translucent',
+      title: siteName,
+    },
   };
 }
 
@@ -75,6 +85,7 @@ export default async function RootLayout({
   let danmakuAutoLoadDefault = true;
   let recommendationDataSource = 'Mixed';
   let tmdbApiKey = '';
+  let tmdbImageBaseUrl = 'https://image.tmdb.org';
   let bangumiDataSource =
     (process.env.NEXT_PUBLIC_BANGUMI_DATA_SOURCE as any) || 'direct';
   let bangumiApiBaseUrl =
@@ -115,6 +126,11 @@ export default async function RootLayout({
   let liveEnabled = true;
   let webLiveEnabled = false;
   let customAdFilterVersion = 0;
+  let analyticsEnabled = false;
+  let analyticsProvider: 'umami' | 'google' | 'clarity' | 'custom' = 'umami';
+  let analyticsScriptUrl = '';
+  let analyticsWebsiteId = '';
+  let analyticsCustomScript = '';
   let musicFeatureEnabled = false;
   let suwayomiEnabled = false;
   let booksEnabled =
@@ -160,6 +176,8 @@ export default async function RootLayout({
     recommendationDataSource =
       config.SiteConfig.RecommendationDataSource || 'Mixed';
     tmdbApiKey = config.SiteConfig.TMDBApiKey || '';
+    tmdbImageBaseUrl =
+      config.SiteConfig.TMDBImageBaseUrl || 'https://image.tmdb.org';
     bangumiDataSource = config.SiteConfig.BangumiDataSource || 'direct';
     bangumiApiBaseUrl =
       config.SiteConfig.BangumiApiBaseUrl || 'https://api.bgm.tv';
@@ -202,6 +220,12 @@ export default async function RootLayout({
     webLiveEnabled = config.WebLiveEnabled ?? false;
     // 自定义去广告代码版本号
     customAdFilterVersion = config.SiteConfig?.CustomAdFilterVersion || 0;
+    // 流量统计配置
+    analyticsEnabled = config.SiteConfig?.AnalyticsEnabled || false;
+    analyticsProvider = config.SiteConfig?.AnalyticsProvider || 'umami';
+    analyticsScriptUrl = config.SiteConfig?.AnalyticsScriptUrl || '';
+    analyticsWebsiteId = config.SiteConfig?.AnalyticsWebsiteId || '';
+    analyticsCustomScript = config.SiteConfig?.AnalyticsCustomScript || '';
     // 音乐功能配置
     musicFeatureEnabled = config.MusicConfig?.Enabled || false;
     musicProxyEnabled = config.MusicConfig?.ProxyEnabled ?? true;
@@ -259,6 +283,7 @@ export default async function RootLayout({
     EnableComments: enableComments,
     DANMAKU_AUTO_LOAD_DEFAULT: danmakuAutoLoadDefault,
     RecommendationDataSource: recommendationDataSource,
+    TMDB_IMAGE_BASE_URL: tmdbImageBaseUrl,
     BANGUMI_DATA_SOURCE: bangumiDataSource,
     BANGUMI_API_BASE_URL: bangumiApiBaseUrl,
     BANGUMI_IMAGE_BASE_URL: bangumiImageBaseUrl,
@@ -319,8 +344,10 @@ export default async function RootLayout({
   };
 
   return (
-    <html lang='zh-CN' suppressHydrationWarning>
+    <html lang='zh-CN' data-moontvplus='1' suppressHydrationWarning>
       <head>
+        {/* 配套 moontvplus-extension 识别指纹；仅本项目部署站应带此标记 */}
+        <meta name='moontvplus-site' content='1' />
         <meta
           name='viewport'
           content='width=device-width, initial-scale=1.0, viewport-fit=cover'
@@ -335,6 +362,44 @@ export default async function RootLayout({
             __html: `window.RUNTIME_CONFIG = ${JSON.stringify(runtimeConfig)};`,
           }}
         />
+        {/* 流量统计脚本 */}
+        {analyticsEnabled && analyticsProvider === 'umami' && analyticsScriptUrl && (
+          <>
+            {/* eslint-disable-next-line @next/next/no-sync-scripts */}
+            <script
+              async
+              defer
+              data-website-id={analyticsWebsiteId}
+              src={analyticsScriptUrl}
+            />
+          </>
+        )}
+        {analyticsEnabled && analyticsProvider === 'google' && analyticsWebsiteId && (
+          <>
+            {/* eslint-disable-next-line @next/next/no-sync-scripts */}
+            <script
+              async
+              src={`https://www.googletagmanager.com/gtag/js?id=${analyticsWebsiteId}`}
+            />
+            <script
+              dangerouslySetInnerHTML={{
+                __html: `window.dataLayer = window.dataLayer || [];function gtag(){dataLayer.push(arguments);}gtag('js', new Date());gtag('config', '${analyticsWebsiteId}');`,
+              }}
+            />
+          </>
+        )}
+        {analyticsEnabled && analyticsProvider === 'clarity' && analyticsWebsiteId && (
+          <script
+            dangerouslySetInnerHTML={{
+              __html: `(function(c,l,a,r,i,t,y){c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);})(window,document,"clarity","script","${analyticsWebsiteId}");`,
+            }}
+          />
+        )}
+        {analyticsEnabled && analyticsProvider === 'custom' && analyticsCustomScript && (
+          <script
+            dangerouslySetInnerHTML={{ __html: analyticsCustomScript }}
+          />
+        )}
       </head>
       <body
         className={`${inter.className} min-h-screen bg-white text-gray-900 dark:bg-black dark:text-gray-200`}

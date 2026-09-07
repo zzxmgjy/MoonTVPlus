@@ -1,11 +1,14 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, no-console, @typescript-eslint/no-non-null-assertion */
 
 import { db } from '@/lib/db';
+import { normalizeApiBaseUrl } from '@/lib/url';
 
 import { AdminConfig } from './admin.types';
+import { setServerTmdbImageBaseUrl } from './tmdb-image-base';
 
 const BUILTIN_DANMAKU_API_BASE = 'https://mtvpls-danmu.netlify.app/87654321';
 const DEFAULT_LIVE_REFRESH_INTERVAL_HOURS = 12;
+const DEFAULT_TMDB_IMAGE_BASE_URL = 'https://image.tmdb.org';
 
 function normalizeLiveRefreshIntervalHours(
   refreshIntervalHours?: number
@@ -295,6 +298,8 @@ async function getInitConfig(
       TMDBApiKey: process.env.TMDB_API_KEY || '',
       TMDBProxy: process.env.TMDB_PROXY || '',
       TMDBReverseProxy: process.env.TMDB_REVERSE_PROXY || '',
+      TMDBImageBaseUrl:
+        process.env.TMDB_IMAGE_BASE_URL || DEFAULT_TMDB_IMAGE_BASE_URL,
       // 动漫/Bangumi配置
       BangumiDataSource:
         (process.env.NEXT_PUBLIC_BANGUMI_DATA_SOURCE as any) || 'direct',
@@ -307,6 +312,7 @@ async function getInitConfig(
         process.env.NEXT_PUBLIC_BANGUMI_IMAGE_BASE_URL ||
         '',
       BangumiProxy: process.env.BANGUMI_PROXY || '',
+      LiveChartProxy: process.env.LIVECHART_PROXY || '',
       // Pansou配置
       PansouApiUrl: '',
       PansouUsername: '',
@@ -328,6 +334,12 @@ async function getInitConfig(
       TurnstileSiteKey: '',
       TurnstileSecretKey: '',
       DefaultUserTags: [],
+      // 流量统计配置
+      AnalyticsEnabled: false,
+      AnalyticsProvider: 'umami',
+      AnalyticsScriptUrl: '',
+      AnalyticsWebsiteId: '',
+      AnalyticsCustomScript: '',
     },
     UserConfig: {
       Users: [],
@@ -353,6 +365,7 @@ async function getInitConfig(
       : Array.isArray(cfgFile.specialSourceApis)
       ? cfgFile.specialSourceApis
       : [],
+    ClientAdSourceApis: [],
   };
 
   // 用户信息已迁移到新版数据库，不再填充 UserConfig.Users
@@ -519,6 +532,7 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
       DanmakuApiBase: BUILTIN_DANMAKU_API_BASE,
       DanmakuApiToken: '87654321',
       DanmakuAutoLoadDefault: true,
+      TMDBImageBaseUrl: DEFAULT_TMDB_IMAGE_BASE_URL,
       PansouApiUrl: '',
       PansouUsername: '',
       PansouPassword: '',
@@ -555,6 +569,9 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   if (adminConfig.SiteConfig.DanmakuAutoLoadDefault === undefined) {
     adminConfig.SiteConfig.DanmakuAutoLoadDefault = true;
   }
+  if (adminConfig.SiteConfig.LiveChartProxy === undefined) {
+    adminConfig.SiteConfig.LiveChartProxy = process.env.LIVECHART_PROXY || '';
+  }
   // 确保评论开关存在
   if (adminConfig.SiteConfig.EnableComments === undefined) {
     adminConfig.SiteConfig.EnableComments = false;
@@ -587,6 +604,22 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   }
   if (adminConfig.SiteConfig.DefaultUserTags === undefined) {
     adminConfig.SiteConfig.DefaultUserTags = [];
+  }
+  // 流量统计配置补全
+  if (adminConfig.SiteConfig.AnalyticsEnabled === undefined) {
+    adminConfig.SiteConfig.AnalyticsEnabled = false;
+  }
+  if (adminConfig.SiteConfig.AnalyticsProvider === undefined) {
+    adminConfig.SiteConfig.AnalyticsProvider = 'umami';
+  }
+  if (adminConfig.SiteConfig.AnalyticsScriptUrl === undefined) {
+    adminConfig.SiteConfig.AnalyticsScriptUrl = '';
+  }
+  if (adminConfig.SiteConfig.AnalyticsWebsiteId === undefined) {
+    adminConfig.SiteConfig.AnalyticsWebsiteId = '';
+  }
+  if (adminConfig.SiteConfig.AnalyticsCustomScript === undefined) {
+    adminConfig.SiteConfig.AnalyticsCustomScript = '';
   }
   if (!adminConfig.TelegramConfig) {
     adminConfig.TelegramConfig = {
@@ -652,6 +685,12 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   ) {
     adminConfig.SpecialSourceApis = [];
   }
+  if (
+    !adminConfig.ClientAdSourceApis ||
+    !Array.isArray(adminConfig.ClientAdSourceApis)
+  ) {
+    adminConfig.ClientAdSourceApis = [];
+  }
   adminConfig.LiveRefreshIntervalHours = normalizeLiveRefreshIntervalHours(
     adminConfig.LiveRefreshIntervalHours
   );
@@ -679,6 +718,9 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
     if (adminConfig.OpenListConfig.OfflineDownloadPassword === undefined) {
       adminConfig.OpenListConfig.OfflineDownloadPassword = '';
     }
+    if (adminConfig.OpenListConfig.PathMeta === undefined) {
+      adminConfig.OpenListConfig.PathMeta = {};
+    }
   }
 
   // 用户信息已迁移到新版数据库
@@ -705,6 +747,9 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   const validSourceKeys = new Set(adminConfig.SourceConfig.map((source) => source.key));
   adminConfig.SpecialSourceApis = Array.from(
     new Set((adminConfig.SpecialSourceApis || []).filter((key) => validSourceKeys.has(key)))
+  );
+  adminConfig.ClientAdSourceApis = Array.from(
+    new Set((adminConfig.ClientAdSourceApis || []).filter((key) => validSourceKeys.has(key)))
   );
 
   // 自定义分类去重
@@ -1011,6 +1056,116 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
       adminConfig.OPDSConfig.CacheTTL = 10 * 60 * 1000;
     }
   }
+
+  // API Base URL 统一去尾斜杠，避免拼接路径时出现 //
+  const site = adminConfig.SiteConfig;
+  if (site) {
+    site.DoubanProxy = normalizeApiBaseUrl(site.DoubanProxy);
+    site.DoubanImageProxy = normalizeApiBaseUrl(site.DoubanImageProxy);
+    site.DanmakuApiBase = normalizeApiBaseUrl(site.DanmakuApiBase);
+    site.TMDBProxy = normalizeApiBaseUrl(site.TMDBProxy);
+    site.TMDBReverseProxy = normalizeApiBaseUrl(site.TMDBReverseProxy);
+    site.TMDBImageBaseUrl = normalizeApiBaseUrl(
+      site.TMDBImageBaseUrl || DEFAULT_TMDB_IMAGE_BASE_URL
+    );
+    site.BangumiApiBaseUrl = normalizeApiBaseUrl(site.BangumiApiBaseUrl);
+    site.BangumiImageBaseUrl = normalizeApiBaseUrl(site.BangumiImageBaseUrl);
+    site.BangumiProxy = normalizeApiBaseUrl(site.BangumiProxy);
+    site.LiveChartProxy = normalizeApiBaseUrl(site.LiveChartProxy);
+    site.PansouApiUrl = normalizeApiBaseUrl(site.PansouApiUrl);
+    site.MagnetProxy = normalizeApiBaseUrl(site.MagnetProxy);
+    site.MagnetMikanReverseProxy = normalizeApiBaseUrl(
+      site.MagnetMikanReverseProxy
+    );
+    site.MagnetDmhyReverseProxy = normalizeApiBaseUrl(
+      site.MagnetDmhyReverseProxy
+    );
+    site.MagnetAcgripReverseProxy = normalizeApiBaseUrl(
+      site.MagnetAcgripReverseProxy
+    );
+    site.MagnetNyaaReverseProxy = normalizeApiBaseUrl(
+      site.MagnetNyaaReverseProxy
+    );
+    site.OIDCIssuer = normalizeApiBaseUrl(site.OIDCIssuer);
+  }
+
+  if (adminConfig.OpenListConfig) {
+    adminConfig.OpenListConfig.URL = normalizeApiBaseUrl(
+      adminConfig.OpenListConfig.URL
+    );
+    adminConfig.OpenListConfig.OfflineDownloadURL = normalizeApiBaseUrl(
+      adminConfig.OpenListConfig.OfflineDownloadURL
+    );
+  }
+
+  if (adminConfig.MusicConfig) {
+    adminConfig.MusicConfig.BaseUrl = normalizeApiBaseUrl(
+      adminConfig.MusicConfig.BaseUrl
+    );
+  }
+
+  if (adminConfig.XiaoyaConfig) {
+    adminConfig.XiaoyaConfig.ServerURL = normalizeApiBaseUrl(
+      adminConfig.XiaoyaConfig.ServerURL
+    );
+  }
+
+  if (adminConfig.SuwayomiConfig) {
+    adminConfig.SuwayomiConfig.ServerURL = normalizeApiBaseUrl(
+      adminConfig.SuwayomiConfig.ServerURL
+    );
+  }
+
+  if (adminConfig.EmbyConfig) {
+    if (adminConfig.EmbyConfig.ServerURL) {
+      adminConfig.EmbyConfig.ServerURL = normalizeApiBaseUrl(
+        adminConfig.EmbyConfig.ServerURL
+      );
+    }
+    if (Array.isArray(adminConfig.EmbyConfig.Sources)) {
+      adminConfig.EmbyConfig.Sources = adminConfig.EmbyConfig.Sources.map(
+        (source) => ({
+          ...source,
+          ServerURL: normalizeApiBaseUrl(source.ServerURL),
+        })
+      );
+    }
+  }
+
+  if (adminConfig.AIConfig) {
+    adminConfig.AIConfig.OpenAIBaseURL = normalizeApiBaseUrl(
+      adminConfig.AIConfig.OpenAIBaseURL
+    );
+    adminConfig.AIConfig.ClaudeBaseURL = normalizeApiBaseUrl(
+      adminConfig.AIConfig.ClaudeBaseURL
+    );
+    adminConfig.AIConfig.CustomBaseURL = normalizeApiBaseUrl(
+      adminConfig.AIConfig.CustomBaseURL
+    );
+    adminConfig.AIConfig.DecisionOpenAIBaseURL = normalizeApiBaseUrl(
+      adminConfig.AIConfig.DecisionOpenAIBaseURL
+    );
+    adminConfig.AIConfig.DecisionCustomBaseURL = normalizeApiBaseUrl(
+      adminConfig.AIConfig.DecisionCustomBaseURL
+    );
+    // 新版工具式调用：补充默认值，避免旧存储配置未定义
+    adminConfig.AIConfig.EnableNewMode = adminConfig.AIConfig.EnableNewMode ?? true;
+    adminConfig.AIConfig.NewProtocol =
+      adminConfig.AIConfig.NewProtocol ?? 'openai-completions';
+    adminConfig.AIConfig.MaxContext = adminConfig.AIConfig.MaxContext ?? 131072;
+    adminConfig.AIConfig.CompressThreshold = adminConfig.AIConfig.CompressThreshold ?? 90;
+  }
+
+  if (adminConfig.TelegramConfig) {
+    adminConfig.TelegramConfig.apiBaseUrl = normalizeApiBaseUrl(
+      adminConfig.TelegramConfig.apiBaseUrl
+    );
+  }
+
+  // 同步 TMDB 图片默认地址到轻量模块，供 getTMDBImageUrl 等服务端图片拼接使用
+  setServerTmdbImageBaseUrl(adminConfig.SiteConfig?.TMDBImageBaseUrl);
+
+  // 注意：OPDS source.url 是完整目录 URL，保留末尾 / 以便相对路径解析
 
   return adminConfig;
 }

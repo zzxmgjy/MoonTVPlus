@@ -27,11 +27,18 @@ export interface AdminConfig {
     TMDBApiKey?: string;
     TMDBProxy?: string;
     TMDBReverseProxy?: string;
+    // TMDB 图片默认地址：用户未在本地数据源设置中配置时，图片默认使用该地址
+    TMDBImageBaseUrl?: string;
     // 动漫/Bangumi配置
-    BangumiDataSource?: 'direct' | 'server-proxy' | 'custom-baseurl';
+    BangumiDataSource?:
+      | 'direct'
+      | 'server-proxy'
+      | 'custom-baseurl'
+      | 'sakura';
     BangumiApiBaseUrl?: string;
     BangumiImageBaseUrl?: string;
     BangumiProxy?: string;
+    LiveChartProxy?: string;
     BannerDataSource?: string; // 轮播图数据源：TMDB、TX 或 Douban
     RecommendationDataSource?: string; // 更多推荐数据源：Douban、TMDB、Mixed、MixedSmart
     // Pansou配置
@@ -73,6 +80,12 @@ export interface AdminConfig {
     OIDCClientSecret?: string; // OIDC Client Secret
     OIDCButtonText?: string; // OIDC登录按钮文字
     OIDCMinTrustLevel?: number; // 最低信任等级（仅LinuxDo网站有效，为0时不判断）
+    // 流量统计配置
+    AnalyticsEnabled?: boolean; // 是否启用流量统计
+    AnalyticsProvider?: 'umami' | 'google' | 'clarity' | 'custom'; // 统计服务提供商
+    AnalyticsScriptUrl?: string; // 脚本URL（Umami: umami.js地址; GA: gtag URL; 自定义: 脚本src）
+    AnalyticsWebsiteId?: string; // 网站ID（Umami: website_id; GA: Measurement ID如G-XXXX; 自定义: 留空）
+    AnalyticsCustomScript?: string; // 自定义统计代码（仅custom模式使用，完整的HTML脚本内容）
   };
   UserConfig: {
     Users: {
@@ -89,6 +102,7 @@ export interface AdminConfig {
     }[];
   };
   SpecialSourceApis?: string[]; // 特殊源 key 列表，默认对普通入口隐藏
+  ClientAdSourceApis?: string[]; // 客户端去广告源 key 列表：MoonTVPlus APP / OrionTV 请求 source-detail 时 m3u8 套 proxy-m3u8
   SourceConfig: {
     key: string;
     name: string;
@@ -159,6 +173,16 @@ export interface AdminConfig {
     ScanInterval?: number; // 定时扫描间隔（分钟），0表示关闭，最低60分钟
     ScanMode?: 'torrent' | 'name' | 'hybrid'; // 扫描模式：torrent=种子库匹配，name=名字匹配，hybrid=混合模式（默认）
     DisableVideoPreview?: boolean; // 禁用预览视频，直接返回直连链接
+    /**
+     * 路径元信息（最长前缀匹配 folder 路径）
+     * key: 规范化路径前缀，如 /videos 可匹配 /videos/某影片
+     */
+    PathMeta?: {
+      [path: string]: {
+        category: string; // 分类名
+        refresh14m: boolean; // 该路径播放时是否启用 14 分钟 URL 续期
+      };
+    };
   };
   NetDiskConfig?: {
     Quark?: {
@@ -206,6 +230,7 @@ export interface AdminConfig {
     OpenAIModel?: string; // 模型名称，如gpt-4, gpt-3.5-turbo
     // Claude配置
     ClaudeApiKey?: string;
+    ClaudeBaseURL?: string; // Claude Messages API根地址
     ClaudeModel?: string; // 模型名称，如claude-3-opus-20240229
     // 自定义配置（兼容OpenAI格式的API）
     CustomApiKey?: string;
@@ -224,10 +249,15 @@ export interface AdminConfig {
     DecisionCustomModel?: string;
     // 联网搜索配置
     EnableWebSearch: boolean; // 是否启用联网搜索
-    WebSearchProvider?: 'tavily' | 'serper' | 'serpapi'; // 搜索服务提供商
+    WebSearchProvider?: 'tavily' | 'serper' | 'serpapi' | 'bing'; // 搜索服务提供商
     TavilyApiKey?: string; // Tavily API密钥
     SerperApiKey?: string; // Serper.dev API密钥
     SerpApiKey?: string; // SerpAPI密钥
+    // 新版工具式调用配置
+    EnableNewMode?: boolean; // 是否启用新版工具式调用（LLM 工具/function-calling），默认 true
+    NewProtocol?: 'openai-completions' | 'openai-responses' | 'claude'; // 新版协议，默认 openai-completions
+    MaxContext?: number; // 最大上下文 token 数，默认 131072（128k）
+    CompressThreshold?: number; // 上下文压缩触发阈值百分比（0-100），默认 90；0=关闭
     // 功能开关
     EnableHomepageEntry: boolean; // 首页入口开关
     EnableVideoCardEntry: boolean; // VideoCard入口开关
@@ -375,9 +405,16 @@ export interface AdminConfig {
     Subscriptions: Array<{
       id: string;
       title: string;
+      /** 包含关键词：支持 & | ()；无运算符时逗号=AND */
       filterText: string;
+      /** 排除关键词：支持 & | ()；无运算符时逗号=OR */
+      excludeText?: string;
       source: 'acgrip' | 'mikan' | 'dmhy' | 'nyaa';
       enabled: boolean;
+      /** 单集只下载一次（默认 false） */
+      onePerEpisode?: boolean;
+      /** 缺集重新检索（默认 false） */
+      refillMissingEpisodes?: boolean;
       lastCheckTime: number;
       lastEpisode: number;
       createdAt: number;

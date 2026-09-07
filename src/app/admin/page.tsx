@@ -24,6 +24,7 @@ import { CSS } from '@dnd-kit/utilities';
 import {
   AlertCircle,
   AlertTriangle,
+  BarChart3,
   BookMarked,
   BookOpen,
   Bot,
@@ -211,7 +212,7 @@ const AlertModal = ({
 
   return createPortal(
     <div
-      className={`fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 transition-opacity duration-200 ${
+      className={`fixed inset-0 bg-black bg-opacity-50 z-[10050] flex items-center justify-center p-4 transition-opacity duration-200 ${
         isVisible ? 'opacity-100' : 'opacity-0'
       }`}
     >
@@ -373,10 +374,16 @@ interface SiteConfig {
   TMDBApiKey?: string;
   TMDBProxy?: string;
   TMDBReverseProxy?: string;
-  BangumiDataSource?: 'direct' | 'server-proxy' | 'custom-baseurl';
+  TMDBImageBaseUrl?: string;
+  BangumiDataSource?:
+    | 'direct'
+    | 'server-proxy'
+    | 'custom-baseurl'
+    | 'sakura';
   BangumiApiBaseUrl?: string;
   BangumiImageBaseUrl?: string;
   BangumiProxy?: string;
+  LiveChartProxy?: string;
   BannerDataSource?: string;
   RecommendationDataSource?: string;
   PansouApiUrl?: string;
@@ -406,6 +413,11 @@ interface SiteConfig {
   OIDCClientId?: string;
   OIDCClientSecret?: string;
   OIDCButtonText?: string;
+  AnalyticsEnabled?: boolean;
+  AnalyticsProvider?: 'umami' | 'google' | 'clarity' | 'custom';
+  AnalyticsScriptUrl?: string;
+  AnalyticsWebsiteId?: string;
+  AnalyticsCustomScript?: string;
 }
 
 // 视频源数据类型
@@ -3470,6 +3482,9 @@ const OpenListConfigComponent = ({
     'hybrid'
   );
   const [disableVideoPreview, setDisableVideoPreview] = useState(false);
+  const [pathMetaRows, setPathMetaRows] = useState<
+    Array<{ path: string; category: string; refresh14m: boolean }>
+  >([]);
   const [videos, setVideos] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [scanProgress, setScanProgress] = useState<{
@@ -3479,6 +3494,7 @@ const OpenListConfigComponent = ({
   } | null>(null);
   const [correctDialogOpen, setCorrectDialogOpen] = useState(false);
   const [selectedVideo, setSelectedVideo] = useState<any | null>(null);
+  const [pathMetaDialogOpen, setPathMetaDialogOpen] = useState(false);
 
   useEffect(() => {
     if (config?.OpenListConfig) {
@@ -3507,6 +3523,14 @@ const OpenListConfigComponent = ({
       setScanMode(config.OpenListConfig.ScanMode || 'hybrid');
       setDisableVideoPreview(
         config.OpenListConfig.DisableVideoPreview || false
+      );
+      const pathMeta = config.OpenListConfig.PathMeta || {};
+      setPathMetaRows(
+        Object.entries(pathMeta).map(([path, meta]) => ({
+          path,
+          category: meta?.category || '',
+          refresh14m: Boolean(meta?.refresh14m),
+        }))
       );
     }
   }, [config]);
@@ -3542,6 +3566,22 @@ const OpenListConfigComponent = ({
   const handleSave = async () => {
     await withLoading('saveOpenList', async () => {
       try {
+        // 路径元信息：序列化为 map（匹配时按最长前缀）
+        if (pathMetaRows.some((row) => !(row.path || '').trim())) {
+          throw new Error('路径元信息中的路径不能为空');
+        }
+        const pathMetaPayload: Record<
+          string,
+          { category: string; refresh14m: boolean }
+        > = {};
+        for (const row of pathMetaRows) {
+          const p = (row.path || '').trim();
+          pathMetaPayload[p] = {
+            category: (row.category || '').trim(),
+            refresh14m: Boolean(row.refresh14m),
+          };
+        }
+
         const response = await fetch('/api/admin/openlist', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -3560,6 +3600,7 @@ const OpenListConfigComponent = ({
             ScanInterval: scanInterval,
             ScanMode: scanMode,
             DisableVideoPreview: disableVideoPreview,
+            PathMeta: pathMetaPayload,
           }),
         });
 
@@ -4063,6 +4104,187 @@ const OpenListConfigComponent = ({
             />
           </button>
         </div>
+
+        <div className='flex items-center justify-between py-3 border-b border-gray-200 dark:border-gray-700'>
+          <div>
+            <h3 className='text-sm font-medium text-gray-900 dark:text-white'>
+              路径元信息
+            </h3>
+            <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+              为指定路径下的影片设置分类，以及播放时是否自动刷新链接（约 14 分钟）
+              {pathMetaRows.length > 0
+                ? ` · 已配置 ${pathMetaRows.length} 条`
+                : ''}
+            </p>
+          </div>
+          <button
+            type='button'
+            onClick={() => setPathMetaDialogOpen(true)}
+            disabled={!enabled}
+            className={`${buttonStyles.primary} text-sm ${
+              !enabled ? 'opacity-50 cursor-not-allowed' : ''
+            }`}
+          >
+            设置
+          </button>
+        </div>
+
+        {pathMetaDialogOpen &&
+          createPortal(
+            <div
+              className='fixed inset-0 bg-black bg-opacity-50 z-[10002] flex items-center justify-center p-4'
+              onClick={() => setPathMetaDialogOpen(false)}
+              onTouchMove={(e) => e.preventDefault()}
+              onWheel={(e) => e.preventDefault()}
+              style={{ touchAction: 'none' }}
+            >
+              <div
+                className='w-full max-w-3xl max-h-[85vh] flex flex-col rounded-xl bg-white dark:bg-gray-900 shadow-xl border border-gray-200 dark:border-gray-700'
+                onClick={(e) => e.stopPropagation()}
+                onTouchMove={(e) => e.stopPropagation()}
+                onWheel={(e) => e.stopPropagation()}
+                style={{ touchAction: 'auto' }}
+              >
+                <div className='flex items-center justify-between px-5 py-4 border-b border-gray-200 dark:border-gray-700'>
+                  <h3 className='text-base font-medium text-gray-900 dark:text-white'>
+                    路径元信息
+                  </h3>
+                  <button
+                    type='button'
+                    onClick={() => setPathMetaDialogOpen(false)}
+                    className='text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 text-sm px-2 py-1'
+                  >
+                    关闭
+                  </button>
+                </div>
+
+                <div className='px-5 py-3 text-xs text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-gray-800'>
+                  填写目录路径即可作用于其下所有影片（如 /videos）。更具体的路径优先。改完后点「保存配置」才会生效。
+                </div>
+
+                <div className='flex-1 overflow-y-auto px-5 py-4 space-y-2'>
+                  {pathMetaRows.length === 0 ? (
+                    <p className='text-sm text-gray-400 dark:text-gray-500 text-center py-8'>
+                      暂无配置，点击下方「添加」开始
+                    </p>
+                  ) : (
+                    pathMetaRows.map((row, index) => (
+                      <div
+                        key={index}
+                        className='grid grid-cols-1 md:grid-cols-12 gap-2 items-center'
+                      >
+                        <div className='md:col-span-5'>
+                          <input
+                            type='text'
+                            value={row.path}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              setPathMetaRows((rows) =>
+                                rows.map((r, i) =>
+                                  i === index ? { ...r, path: value } : r
+                                )
+                              );
+                            }}
+                            placeholder='路径，如 /videos'
+                            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+                          />
+                        </div>
+                        <div className='md:col-span-3'>
+                          <input
+                            type='text'
+                            value={row.category}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              setPathMetaRows((rows) =>
+                                rows.map((r, i) =>
+                                  i === index ? { ...r, category: value } : r
+                                )
+                              );
+                            }}
+                            placeholder='分类，如 动漫'
+                            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+                          />
+                        </div>
+                        <div className='md:col-span-3 flex items-center gap-2'>
+                          <span className='text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap'>
+                            播放自动刷新
+                          </span>
+                          <button
+                            type='button'
+                            onClick={() =>
+                              setPathMetaRows((rows) =>
+                                rows.map((r, i) =>
+                                  i === index
+                                    ? { ...r, refresh14m: !r.refresh14m }
+                                    : r
+                                )
+                              )
+                            }
+                            className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
+                              row.refresh14m
+                                ? 'bg-blue-600'
+                                : 'bg-gray-200 dark:bg-gray-700'
+                            }`}
+                            aria-label='播放自动刷新'
+                          >
+                            <span
+                              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                row.refresh14m
+                                  ? 'translate-x-6'
+                                  : 'translate-x-1'
+                              }`}
+                            />
+                          </button>
+                        </div>
+                        <div className='md:col-span-1 flex justify-end'>
+                          <button
+                            type='button'
+                            onClick={() =>
+                              setPathMetaRows((rows) =>
+                                rows.filter((_, i) => i !== index)
+                              )
+                            }
+                            className='px-2 py-1 text-sm text-red-600 hover:text-red-700 dark:text-red-400'
+                          >
+                            删除
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div className='flex items-center justify-between gap-3 px-5 py-4 border-t border-gray-200 dark:border-gray-700'>
+                  <button
+                    type='button'
+                    onClick={() =>
+                      setPathMetaRows((rows) => [
+                        ...rows,
+                        { path: '', category: '', refresh14m: false },
+                      ])
+                    }
+                    className={buttonStyles.primary}
+                  >
+                    添加
+                  </button>
+                  <button
+                    type='button'
+                    onClick={() => {
+                      if (pathMetaRows.some((row) => !(row.path || '').trim())) {
+                        showError('路径不能为空', showAlert);
+                        return;
+                      }
+                      setPathMetaDialogOpen(false);
+                    }}
+                    className={buttonStyles.success}
+                  >
+                    完成
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
 
         <div className='flex gap-3'>
           <button
@@ -6351,7 +6573,9 @@ const VideoSourceConfig = ({
   const [showValidationModal, setShowValidationModal] = useState(false);
   const [showWeightModal, setShowWeightModal] = useState(false);
   const [showSpecialSourcesModal, setShowSpecialSourcesModal] = useState(false);
+  const [showClientAdSourcesModal, setShowClientAdSourcesModal] = useState(false);
   const [specialSourceDraftApis, setSpecialSourceDraftApis] = useState<string[]>([]);
+  const [clientAdSourceDraftApis, setClientAdSourceDraftApis] = useState<string[]>([]);
   const [weightDraftSources, setWeightDraftSources] = useState<DataSource[]>(
     []
   );
@@ -6505,6 +6729,28 @@ const VideoSourceConfig = ({
       closeSpecialSourcesModal();
     }).catch(() => {
       console.error('操作失败', 'set_special_sources');
+    });
+  };
+
+  const openClientAdSourcesModal = () => {
+    setClientAdSourceDraftApis(config?.ClientAdSourceApis || []);
+    setShowClientAdSourcesModal(true);
+  };
+
+  const closeClientAdSourcesModal = () => {
+    setShowClientAdSourcesModal(false);
+    setClientAdSourceDraftApis([]);
+  };
+
+  const handleSaveClientAdSources = async () => {
+    await withLoading('saveClientAdSources', async () => {
+      await callSourceApi({
+        action: 'set_client_ad_sources',
+        keys: clientAdSourceDraftApis,
+      });
+      closeClientAdSourcesModal();
+    }).catch(() => {
+      console.error('操作失败', 'set_client_ad_sources');
     });
   };
 
@@ -7369,52 +7615,73 @@ const VideoSourceConfig = ({
               <div className='hidden sm:block w-px h-6 bg-gray-300 dark:bg-gray-600 order-2'></div>
             </>
           )}
-          <div className='flex items-center gap-2 overflow-x-auto whitespace-nowrap order-1 sm:order-2'>
-            <button
-              onClick={openSpecialSourcesModal}
-              className={`${buttonStyles.secondary} flex shrink-0 items-center gap-1.5 whitespace-nowrap`}
-              title='批量选择哪些视频源属于特殊源'
-            >
-              <Settings size={14} />
-              <span>特殊源设置</span>
-              {(config?.SpecialSourceApis?.length || 0) > 0 && (
-                <span className='rounded-full bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700 dark:bg-rose-900/30 dark:text-rose-300'>
-                  {config?.SpecialSourceApis?.length}
-                </span>
-              )}
-            </button>
-            <button
-              onClick={openWeightModal}
-              className={`${buttonStyles.secondary} flex shrink-0 items-center gap-1.5 whitespace-nowrap`}
-              title='拖动排序并批量生成推荐权重'
-            >
-              <Settings size={14} />
-              <span>权重设置</span>
-            </button>
-            <button
-              onClick={() => setShowValidationModal(true)}
-              disabled={isValidating}
-              className={`px-3 py-1 text-sm rounded-lg transition-colors flex shrink-0 items-center space-x-1 whitespace-nowrap ${
-                isValidating ? buttonStyles.disabled : buttonStyles.primary
-              }`}
-            >
-              {isValidating ? (
-                <>
-                  <div className='w-3 h-3 border border-white border-t-transparent rounded-full animate-spin'></div>
-                  <span>检测中...</span>
-                </>
-              ) : (
-                '有效性检测'
-              )}
-            </button>
-            <button
-              onClick={() => setShowAddForm(!showAddForm)}
-              className={`${
-                showAddForm ? buttonStyles.secondary : buttonStyles.success
-              } shrink-0 whitespace-nowrap`}
-            >
-              {showAddForm ? '取消' : '添加视频源'}
-            </button>
+          <div className='flex w-full flex-col gap-2 order-1 sm:order-2 sm:w-auto sm:flex-row sm:items-center sm:gap-2'>
+            <div className='w-full overflow-x-auto sm:w-auto'>
+              <div className='ml-auto flex w-max items-center gap-2 whitespace-nowrap'>
+                <button
+                  onClick={openSpecialSourcesModal}
+                  className={`${buttonStyles.secondary} flex shrink-0 items-center gap-1.5 whitespace-nowrap`}
+                  title='批量选择哪些视频源属于特殊源'
+                >
+                  <Settings size={14} />
+                  <span>特殊源设置</span>
+                  {(config?.SpecialSourceApis?.length || 0) > 0 && (
+                    <span className='rounded-full bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700 dark:bg-rose-900/30 dark:text-rose-300'>
+                      {config?.SpecialSourceApis?.length}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={openWeightModal}
+                  className={`${buttonStyles.secondary} flex shrink-0 items-center gap-1.5 whitespace-nowrap`}
+                  title='拖动排序并批量生成推荐权重'
+                >
+                  <Settings size={14} />
+                  <span>权重设置</span>
+                </button>
+                <button
+                  onClick={openClientAdSourcesModal}
+                  className={`${buttonStyles.secondary} flex shrink-0 items-center gap-1.5 whitespace-nowrap`}
+                  title='选择在手机/电视客户端播放时自动去广告的视频源'
+                >
+                  <Settings size={14} />
+                  <span>客户端广告配置</span>
+                  {(config?.ClientAdSourceApis?.length || 0) > 0 && (
+                    <span className='rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'>
+                      {config?.ClientAdSourceApis?.length}
+                    </span>
+                  )}
+                </button>
+              </div>
+            </div>
+            <div className='w-full overflow-x-auto sm:w-auto'>
+              <div className='ml-auto flex w-max items-center gap-2 whitespace-nowrap'>
+                <button
+                  onClick={() => setShowValidationModal(true)}
+                  disabled={isValidating}
+                  className={`px-3 py-1 text-sm rounded-lg transition-colors flex shrink-0 items-center space-x-1 whitespace-nowrap ${
+                    isValidating ? buttonStyles.disabled : buttonStyles.primary
+                  }`}
+                >
+                  {isValidating ? (
+                    <>
+                      <div className='w-3 h-3 border border-white border-t-transparent rounded-full animate-spin'></div>
+                      <span>检测中...</span>
+                    </>
+                  ) : (
+                    '有效性检测'
+                  )}
+                </button>
+                <button
+                  onClick={() => setShowAddForm(!showAddForm)}
+                  className={`${
+                    showAddForm ? buttonStyles.secondary : buttonStyles.success
+                  } shrink-0 whitespace-nowrap`}
+                >
+                  {showAddForm ? '取消' : '添加视频源'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -7648,6 +7915,119 @@ const VideoSourceConfig = ({
                     }`}
                   >
                     {isLoading('saveSpecialSources') ? '保存中...' : '保存'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {showClientAdSourcesModal &&
+        createPortal(
+          <div
+            className='fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm'
+            onClick={closeClientAdSourcesModal}
+          >
+            <div
+              className='flex max-h-[84vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-800'
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className='flex items-start justify-between gap-4 border-b border-gray-200 px-6 py-5 dark:border-gray-700'>
+                <div>
+                  <h3 className='text-xl font-semibold text-gray-900 dark:text-gray-100'>
+                    客户端去广告配置
+                  </h3>
+                  <p className='mt-1 text-sm text-gray-600 dark:text-gray-400'>
+                    勾选后，用户使用 MoonTVPlus APP 或 OrionTV 观看这些视频源时，会自动过滤片头/插播广告。
+                  </p>
+                </div>
+                <button
+                  onClick={closeClientAdSourcesModal}
+                  className='text-2xl leading-none text-gray-400 transition-colors hover:text-gray-600 dark:hover:text-gray-300'
+                  aria-label='关闭客户端去广告配置弹窗'
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className='min-h-0 flex-1 overflow-y-auto px-6 py-5'>
+                <div className='grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3'>
+                  {config?.SourceConfig?.map((source) => (
+                    <label
+                      key={source.key}
+                      className='flex cursor-pointer items-center space-x-3 rounded-lg border border-gray-200 p-3 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-900/50'
+                    >
+                      <input
+                        type='checkbox'
+                        checked={clientAdSourceDraftApis.includes(source.key)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setClientAdSourceDraftApis((prev) =>
+                              prev.includes(source.key) ? prev : [...prev, source.key]
+                            );
+                          } else {
+                            setClientAdSourceDraftApis((prev) =>
+                              prev.filter((api) => api !== source.key)
+                            );
+                          }
+                        }}
+                        className='rounded border-gray-300 text-amber-600 focus:ring-amber-500 dark:border-gray-600 dark:bg-gray-700'
+                      />
+                      <div className='min-w-0 flex-1'>
+                        <div className='truncate text-sm font-medium text-gray-900 dark:text-gray-100'>
+                          {source.name}
+                        </div>
+                        <div className='truncate text-xs text-gray-500 dark:text-gray-400'>
+                          {source.key}
+                        </div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className='flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 bg-gray-50 px-6 py-4 dark:border-gray-700 dark:bg-gray-900/30'>
+                <div className='flex flex-wrap gap-2'>
+                  <button
+                    onClick={() => setClientAdSourceDraftApis([])}
+                    className={buttonStyles.quickAction}
+                  >
+                    全不选
+                  </button>
+                  <button
+                    onClick={() => {
+                      const allApis =
+                        config?.SourceConfig?.filter((source) => !source.disabled).map(
+                          (source) => source.key
+                        ) || [];
+                      setClientAdSourceDraftApis(allApis);
+                    }}
+                    className={buttonStyles.quickAction}
+                  >
+                    全选启用源
+                  </button>
+                </div>
+                <div className='flex items-center gap-3'>
+                  <span className='text-sm text-gray-600 dark:text-gray-400'>
+                    已选择：
+                    <span className='font-medium text-amber-600 dark:text-amber-400'>
+                      {clientAdSourceDraftApis.length} 个源
+                    </span>
+                  </span>
+                  <button onClick={closeClientAdSourcesModal} className={buttonStyles.secondary}>
+                    取消
+                  </button>
+                  <button
+                    onClick={handleSaveClientAdSources}
+                    disabled={isLoading('saveClientAdSources')}
+                    className={`px-4 py-2 ${
+                      isLoading('saveClientAdSources')
+                        ? buttonStyles.disabled
+                        : buttonStyles.success
+                    }`}
+                  >
+                    {isLoading('saveClientAdSources') ? '保存中...' : '保存'}
                   </button>
                 </div>
               </div>
@@ -10167,10 +10547,12 @@ const SiteConfigComponent = ({
     TMDBApiKey: '',
     TMDBProxy: '',
     TMDBReverseProxy: '',
+    TMDBImageBaseUrl: 'https://image.tmdb.org',
     BangumiDataSource: 'direct',
     BangumiApiBaseUrl: 'https://api.bgm.tv',
     BangumiImageBaseUrl: '',
     BangumiProxy: '',
+    LiveChartProxy: '',
     BannerDataSource: 'Douban',
     RecommendationDataSource: 'Mixed',
     PansouApiUrl: '',
@@ -10198,6 +10580,11 @@ const SiteConfigComponent = ({
     OIDCClientId: '',
     OIDCClientSecret: '',
     OIDCButtonText: '',
+    AnalyticsEnabled: false,
+    AnalyticsProvider: 'umami',
+    AnalyticsScriptUrl: '',
+    AnalyticsWebsiteId: '',
+    AnalyticsCustomScript: '',
   });
 
   // 豆瓣数据源相关状态
@@ -10286,11 +10673,14 @@ const SiteConfigComponent = ({
         TMDBApiKey: config.SiteConfig.TMDBApiKey || '',
         TMDBProxy: config.SiteConfig.TMDBProxy || '',
         TMDBReverseProxy: config.SiteConfig.TMDBReverseProxy || '',
+        TMDBImageBaseUrl:
+          config.SiteConfig.TMDBImageBaseUrl || 'https://image.tmdb.org',
         BangumiDataSource: config.SiteConfig.BangumiDataSource || 'direct',
         BangumiApiBaseUrl:
           config.SiteConfig.BangumiApiBaseUrl || 'https://api.bgm.tv',
         BangumiImageBaseUrl: config.SiteConfig.BangumiImageBaseUrl || '',
         BangumiProxy: config.SiteConfig.BangumiProxy || '',
+        LiveChartProxy: config.SiteConfig.LiveChartProxy || '',
         BannerDataSource: config.SiteConfig.BannerDataSource || 'Douban',
         RecommendationDataSource:
           config.SiteConfig.RecommendationDataSource || 'Mixed',
@@ -11112,6 +11502,29 @@ const SiteConfigComponent = ({
               配置 TMDB 反向代理 Base URL（可选）
             </p>
           </div>
+
+          {/* TMDB Image Base URL */}
+          <div>
+            <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+              TMDB 图片默认地址
+            </label>
+            <input
+              type='text'
+              placeholder='https://image.tmdb.org'
+              value={siteSettings.TMDBImageBaseUrl}
+              onChange={(e) =>
+                setSiteSettings((prev) => ({
+                  ...prev,
+                  TMDBImageBaseUrl: e.target.value,
+                }))
+              }
+              className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
+            />
+            <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+              用户未在本地数据源设置中配置 TMDB 图片地址时，图片默认使用该地址（默认
+              https://image.tmdb.org）
+            </p>
+          </div>
         </div>
       </details>
 
@@ -11134,6 +11547,7 @@ const SiteConfigComponent = ({
               {[
                 { value: 'direct', label: '直连' },
                 { value: 'server-proxy', label: '服务器代理' },
+                { value: 'sakura', label: '桜色镜像站' },
                 { value: 'custom-baseurl', label: '自定义 Base URL' },
               ].map((option) => (
                 <button
@@ -11226,6 +11640,27 @@ const SiteConfigComponent = ({
             <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
               用于服务器代理访问 Bangumi API。Cloudflare
               部署环境下不会使用该代理。
+            </p>
+          </div>
+
+          <div>
+            <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+              LiveChart 系统代理
+            </label>
+            <input
+              type='text'
+              placeholder='例如: http://127.0.0.1:7890'
+              value={siteSettings.LiveChartProxy || ''}
+              onChange={(e) =>
+                setSiteSettings((prev) => ({
+                  ...prev,
+                  LiveChartProxy: e.target.value,
+                }))
+              }
+              className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
+            />
+            <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+              用于服务器代理访问 LiveChart 番剧时刻表。留空则直连。
             </p>
           </div>
 
@@ -11525,6 +11960,194 @@ const SiteConfigComponent = ({
               开启后将显示豆瓣评论与相似推荐。评论为逆向抓取，请自行承担责任。
             </p>
           </div>
+        </div>
+      </details>
+
+      {/* 流量统计配置 */}
+      <details className='group rounded-lg border border-gray-200 p-4 dark:border-gray-700'>
+        <summary className='flex cursor-pointer items-center justify-between font-medium text-gray-900 dark:text-gray-100'>
+          <span className='flex items-center gap-2'>
+            <BarChart3 className='h-5 w-5' />
+            流量统计
+          </span>
+          <ChevronDown className='h-5 w-5 transition-transform group-open:rotate-180' />
+        </summary>
+        <div className='mt-4 space-y-4'>
+          {/* 启用开关 */}
+          <div className='flex items-center justify-between'>
+            <div>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300'>
+                启用流量统计
+              </label>
+              <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+                开启后将在页面中注入统计脚本，支持 Umami、Google Analytics 和自定义代码
+              </p>
+            </div>
+            <button
+              type='button'
+              onClick={() =>
+                setSiteSettings((prev) => ({
+                  ...prev,
+                  AnalyticsEnabled: !prev.AnalyticsEnabled,
+                }))
+              }
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${
+                siteSettings.AnalyticsEnabled
+                  ? buttonStyles.toggleOn
+                  : buttonStyles.toggleOff
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full ${
+                  buttonStyles.toggleThumb
+                } transition-transform ${
+                  siteSettings.AnalyticsEnabled
+                    ? buttonStyles.toggleThumbOn
+                    : buttonStyles.toggleThumbOff
+                }`}
+              />
+            </button>
+          </div>
+
+          {siteSettings.AnalyticsEnabled && (
+            <>
+              {/* 统计服务提供商 */}
+              <div>
+                <label className='block text-sm font-medium text-gray-700 dark:text-gray-300'>
+                  统计服务
+                </label>
+                <select
+                  value={siteSettings.AnalyticsProvider}
+                  onChange={(e) =>
+                    setSiteSettings((prev) => ({
+                      ...prev,
+                      AnalyticsProvider: e.target.value as 'umami' | 'google' | 'clarity' | 'custom',
+                    }))
+                  }
+                  className='mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200'
+                >
+                  <option value='umami'>Umami（开源，自托管）</option>
+                  <option value='google'>Google Analytics</option>
+                  <option value='clarity'>Microsoft Clarity（免费，热力图+会话回放）</option>
+                  <option value='custom'>自定义代码</option>
+                </select>
+              </div>
+
+              {siteSettings.AnalyticsProvider === 'umami' && (
+                <>
+                  <div>
+                    <label className='block text-sm font-medium text-gray-700 dark:text-gray-300'>
+                      Umami 脚本地址
+                    </label>
+                    <input
+                      type='text'
+                      value={siteSettings.AnalyticsScriptUrl}
+                      onChange={(e) =>
+                        setSiteSettings((prev) => ({
+                          ...prev,
+                          AnalyticsScriptUrl: e.target.value,
+                        }))
+                      }
+                      placeholder='https://your-umami-server.com/script.js'
+                      className='mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200'
+                    />
+                    <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+                      Umami 实例的 script.js 完整 URL
+                    </p>
+                  </div>
+                  <div>
+                    <label className='block text-sm font-medium text-gray-700 dark:text-gray-300'>
+                      网站 ID (Website ID)
+                    </label>
+                    <input
+                      type='text'
+                      value={siteSettings.AnalyticsWebsiteId}
+                      onChange={(e) =>
+                        setSiteSettings((prev) => ({
+                          ...prev,
+                          AnalyticsWebsiteId: e.target.value,
+                        }))
+                      }
+                      placeholder='e.g. 12345678-abcd-efgh-ijkl-1234567890ab'
+                      className='mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200'
+                    />
+                    <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+                      在 Umami 后台添加网站后获取的 Website ID
+                    </p>
+                  </div>
+                </>
+              )}
+
+              {siteSettings.AnalyticsProvider === 'google' && (
+                <div>
+                  <label className='block text-sm font-medium text-gray-700 dark:text-gray-300'>
+                    Measurement ID
+                  </label>
+                  <input
+                    type='text'
+                    value={siteSettings.AnalyticsWebsiteId}
+                    onChange={(e) =>
+                      setSiteSettings((prev) => ({
+                        ...prev,
+                        AnalyticsWebsiteId: e.target.value,
+                      }))
+                    }
+                    placeholder='G-XXXXXXXXXX'
+                    className='mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200'
+                  />
+                  <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+                    Google Analytics 4 的 Measurement ID，在 GA 后台「数据流」中获取
+                  </p>
+                </div>
+              )}
+
+              {siteSettings.AnalyticsProvider === 'clarity' && (
+                <div>
+                  <label className='block text-sm font-medium text-gray-700 dark:text-gray-300'>
+                    Project ID
+                  </label>
+                  <input
+                    type='text'
+                    value={siteSettings.AnalyticsWebsiteId}
+                    onChange={(e) =>
+                      setSiteSettings((prev) => ({
+                        ...prev,
+                        AnalyticsWebsiteId: e.target.value,
+                      }))
+                    }
+                    placeholder='e.g. abc1234567'
+                    className='mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200'
+                  />
+                  <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+                    Microsoft Clarity 的 Project ID，在 clarity.microsoft.com 项目设置中获取
+                  </p>
+                </div>
+              )}
+
+              {siteSettings.AnalyticsProvider === 'custom' && (
+                <div>
+                  <label className='block text-sm font-medium text-gray-700 dark:text-gray-300'>
+                    自定义统计代码
+                  </label>
+                  <textarea
+                    value={siteSettings.AnalyticsCustomScript}
+                    onChange={(e) =>
+                      setSiteSettings((prev) => ({
+                        ...prev,
+                        AnalyticsCustomScript: e.target.value,
+                      }))
+                    }
+                    placeholder='粘贴完整的统计脚本代码，如百度统计、Plausible、51la 等...'
+                    rows={6}
+                    className='mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 font-mono text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200'
+                  />
+                  <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+                    支持任意第三方统计服务的脚本代码，将直接注入到页面 &lt;head&gt; 中
+                  </p>
+                </div>
+              )}
+            </>
+          )}
         </div>
       </details>
 
@@ -15118,11 +15741,27 @@ const AIConfigComponent = ({
   // 联网搜索配置
   const [enableWebSearch, setEnableWebSearch] = useState(false);
   const [webSearchProvider, setWebSearchProvider] = useState<
-    'tavily' | 'serper' | 'serpapi'
+    'tavily' | 'serper' | 'serpapi' | 'bing'
   >('tavily');
   const [tavilyApiKey, setTavilyApiKey] = useState('');
   const [serperApiKey, setSerperApiKey] = useState('');
   const [serpApiKey, setSerpApiKey] = useState('');
+
+  // 新版工具式调用配置
+  const [enableNewMode, setEnableNewMode] = useState(true);
+  const [newProtocol, setNewProtocol] = useState<
+    'openai-completions' | 'openai-responses' | 'claude'
+  >('openai-completions');
+  const [openaiApiKey, setOpenaiApiKey] = useState('');
+  const [openaiBaseURL, setOpenaiBaseURL] = useState('');
+  const [openaiModel, setOpenaiModel] = useState('');
+  const [claudeApiKey, setClaudeApiKey] = useState('');
+  const [claudeBaseURL, setClaudeBaseURL] = useState('');
+  const [claudeModel, setClaudeModel] = useState('');
+
+  // 新版上下文压缩配置
+  const [maxContext, setMaxContext] = useState(131072);
+  const [compressThreshold, setCompressThreshold] = useState(90);
 
   // 功能开关
   const [enableHomepageEntry, setEnableHomepageEntry] = useState(true);
@@ -15153,6 +15792,16 @@ const AIConfigComponent = ({
       setTavilyApiKey(config.AIConfig.TavilyApiKey || '');
       setSerperApiKey(config.AIConfig.SerperApiKey || '');
       setSerpApiKey(config.AIConfig.SerpApiKey || '');
+      setEnableNewMode(config.AIConfig.EnableNewMode ?? true);
+      setNewProtocol(config.AIConfig.NewProtocol || 'openai-completions');
+      setOpenaiApiKey(config.AIConfig.OpenAIApiKey || '');
+      setOpenaiBaseURL(config.AIConfig.OpenAIBaseURL || '');
+      setOpenaiModel(config.AIConfig.OpenAIModel || '');
+      setClaudeApiKey(config.AIConfig.ClaudeApiKey || '');
+      setClaudeBaseURL(config.AIConfig.ClaudeBaseURL || '');
+      setClaudeModel(config.AIConfig.ClaudeModel || '');
+      setMaxContext(config.AIConfig.MaxContext ?? 131072);
+      setCompressThreshold(config.AIConfig.CompressThreshold ?? 90);
       setEnableHomepageEntry(config.AIConfig.EnableHomepageEntry !== false);
       setEnableVideoCardEntry(config.AIConfig.EnableVideoCardEntry !== false);
       setEnablePlayPageEntry(config.AIConfig.EnablePlayPageEntry !== false);
@@ -15186,6 +15835,16 @@ const AIConfigComponent = ({
             TavilyApiKey: tavilyApiKey,
             SerperApiKey: serperApiKey,
             SerpApiKey: serpApiKey,
+            EnableNewMode: enableNewMode,
+            NewProtocol: newProtocol,
+            MaxContext: maxContext,
+            CompressThreshold: compressThreshold,
+            OpenAIApiKey: openaiApiKey,
+            OpenAIBaseURL: openaiBaseURL,
+            OpenAIModel: openaiModel,
+            ClaudeApiKey: claudeApiKey,
+            ClaudeBaseURL: claudeBaseURL,
+            ClaudeModel: claudeModel,
             EnableHomepageEntry: enableHomepageEntry,
             EnableVideoCardEntry: enableVideoCardEntry,
             EnablePlayPageEntry: enablePlayPageEntry,
@@ -15268,7 +15927,59 @@ const AIConfigComponent = ({
         </label>
       </div>
 
-      {/* AI模型配置 */}
+      {/* 调用模式切换（旧版/新版卡片） */}
+      <div className='space-y-4'>
+        <h3 className='text-base font-semibold text-gray-900 dark:text-gray-100'>
+          调用模式
+        </h3>
+        <div className='grid grid-cols-1 sm:grid-cols-2 gap-3'>
+          {/* 旧版卡片 */}
+          <button
+            type='button'
+            onClick={() => setEnableNewMode(false)}
+            className={`p-4 rounded-lg border-2 text-left transition-colors ${
+              !enableNewMode
+                ? 'border-green-500 bg-green-50/50 dark:bg-green-900/10'
+                : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600'
+            }`}
+          >
+            <div className='flex items-center justify-between'>
+              <span className='text-sm font-semibold text-gray-900 dark:text-gray-100'>
+                旧版
+              </span>
+              {!enableNewMode && <Check className='w-5 h-5 text-green-600' />}
+            </div>
+            <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+              预先分析意图并抓取 联网搜索/豆瓣/TMDB 数据后回答
+            </p>
+          </button>
+
+          {/* 新版卡片 */}
+          <button
+            type='button'
+            onClick={() => setEnableNewMode(true)}
+            className={`p-4 rounded-lg border-2 text-left transition-colors ${
+              enableNewMode
+                ? 'border-green-500 bg-green-50/50 dark:bg-green-900/10'
+                : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600'
+            }`}
+          >
+            <div className='flex items-center justify-between'>
+              <span className='text-sm font-semibold text-gray-900 dark:text-gray-100'>
+                新版（工具式调用）
+              </span>
+              {enableNewMode && <Check className='w-5 h-5 text-green-600' />}
+            </div>
+            <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+              由模型自主决定是否调用相关工具
+            </p>
+          </button>
+        </div>
+      </div>
+
+      {/* 旧版 AI模型配置（仅旧版显示） */}
+      {!enableNewMode && (
+        <>
       <div className='space-y-4'>
         <h3 className='text-base font-semibold text-gray-900 dark:text-gray-100'>
           AI模型配置
@@ -15319,7 +16030,7 @@ const AIConfigComponent = ({
         </div>
       </div>
 
-      {/* 决策模型配置 */}
+      {/* 旧版 决策模型配置（仅旧版显示） */}
       <div className='space-y-4 p-4 border border-gray-200 dark:border-gray-700 rounded-lg'>
         <div>
           <h4 className='text-sm font-semibold text-gray-900 dark:text-gray-100'>
@@ -15356,6 +16067,162 @@ const AIConfigComponent = ({
           </p>
         </div>
       </div>
+      </>
+      )}
+
+      {/* 新版 调用配置（仅新版显示） */}
+      {enableNewMode && (
+      <div className='space-y-4 p-4 border border-gray-200 dark:border-gray-700 rounded-lg'>
+        <div>
+          <h4 className='text-sm font-semibold text-gray-900 dark:text-gray-100'>
+            新版调用配置
+          </h4>
+          <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+            由模型自主决定是否调用相关工具
+          </p>
+        </div>
+
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            调用协议
+          </label>
+          <select
+            value={newProtocol}
+            onChange={(e) => setNewProtocol(e.target.value as any)}
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100'
+          >
+            <option value='openai-completions'>OpenAI 普通协议 (chat/completions)</option>
+            <option value='openai-responses'>OpenAI Response 协议 (/responses)</option>
+            <option value='claude'>Claude Messages 协议 (/v1/messages)</option>
+          </select>
+        </div>
+
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            最大上下文Token数
+          </label>
+          <input
+            type='number'
+            min='1024'
+            step='1024'
+            value={maxContext}
+            onChange={(e) => setMaxContext(parseInt(e.target.value) || 131072)}
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100'
+          />
+          <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+            上下文窗口 token 上限，默认 131072（128k）
+          </p>
+        </div>
+
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            上下文压缩触发阈值 (%)
+          </label>
+          <input
+            type='number'
+            min='0'
+            max='100'
+            step='1'
+            value={compressThreshold}
+            onChange={(e) => setCompressThreshold(parseInt(e.target.value) || 0)}
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100'
+          />
+          <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+            超出后调用 LLM 将较早的工具调用摘要化并丢弃工具消息；0=关闭压缩
+          </p>
+        </div>
+
+        {(newProtocol === 'openai-completions' || newProtocol === 'openai-responses') && (
+          <div className='space-y-3 p-3 bg-purple-50/50 dark:bg-purple-900/10 rounded-lg'>
+            <div>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+                OpenAI API Key
+              </label>
+              <input
+                type='password'
+                value={openaiApiKey}
+                onChange={(e) => setOpenaiApiKey(e.target.value)}
+                placeholder='sk-...'
+                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100'
+              />
+            </div>
+            <div>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+                OpenAI Base URL
+              </label>
+              <input
+                type='text'
+                value={openaiBaseURL}
+                onChange={(e) => setOpenaiBaseURL(e.target.value)}
+                placeholder='https://api.openai.com'
+                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100'
+              />
+            </div>
+            <div>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+                OpenAI 模型
+              </label>
+              <input
+                type='text'
+                value={openaiModel}
+                onChange={(e) => setOpenaiModel(e.target.value)}
+                placeholder='gpt-4o-mini'
+                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100'
+              />
+            </div>
+          </div>
+        )}
+
+        {newProtocol === 'claude' && (
+          <div className='space-y-3 p-3 bg-purple-50/50 dark:bg-purple-900/10 rounded-lg'>
+            <div>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+                Claude API Key
+              </label>
+              <input
+                type='password'
+                value={claudeApiKey}
+                onChange={(e) => setClaudeApiKey(e.target.value)}
+                placeholder='sk-ant-...'
+                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100'
+              />
+            </div>
+            <div>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+                Claude Base URL
+              </label>
+              <input
+                type='text'
+                value={claudeBaseURL}
+                onChange={(e) => setClaudeBaseURL(e.target.value)}
+                placeholder='https://api.anthropic.com'
+                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100'
+              />
+            </div>
+            <div>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+                Claude 模型
+              </label>
+              <input
+                type='text'
+                value={claudeModel}
+                onChange={(e) => setClaudeModel(e.target.value)}
+                placeholder='claude-sonnet-4-6'
+                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100'
+              />
+            </div>
+          </div>
+        )}
+
+        <div className='bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3'>
+          <p className='text-xs text-blue-700 dark:text-blue-400'>
+            💡 <strong>提示:</strong> 由模型自主决定是否调用相关工具。
+            需在站点设置中配置 TMDB API Key（TMDB 工具）、
+            在下方「启用联网搜索」中配置对应搜索服务 API Key（联网搜索工具）。豆瓣工具始终可用。
+          </p>
+        </div>
+      </div>
+      )}
 
       {/* 联网搜索配置 */}
       <div className='space-y-4 p-4 border border-gray-200 dark:border-gray-700 rounded-lg'>
@@ -15393,6 +16260,7 @@ const AIConfigComponent = ({
                 <option value='tavily'>Tavily (推荐)</option>
                 <option value='serper'>Serper.dev</option>
                 <option value='serpapi'>SerpAPI</option>
+                <option value='bing'>Bing RSS（免费，无需 API Key）</option>
               </select>
             </div>
 
